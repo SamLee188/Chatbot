@@ -4,12 +4,14 @@ const OpenAI = require('openai');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000; // Backend server on port 3000
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:8080', 'http://127.0.0.1:8080'], // Allow frontend connections
+  credentials: true
+}));
 app.use(express.json());
-app.use(express.static('public'));
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -260,12 +262,29 @@ app.get('/api/analytics/:sessionId', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Intelligent chatbot server is running',
-    activeSessions: conversationSessions.size
+    message: 'Intelligent chatbot backend server is running on port 3000',
+    activeSessions: conversationSessions.size,
+    serverType: 'backend'
+  });
+});
+
+// Root endpoint for backend info
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Intelligent Chatbot Backend API',
+    version: '1.0.0',
+    endpoints: {
+      chat: 'POST /api/chat',
+      health: 'GET /api/health',
+      conversation: 'GET /api/conversation/:sessionId',
+      analytics: 'GET /api/analytics/:sessionId'
+    },
+    frontend: 'Frontend should be running on http://localhost:8080'
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Intelligent chatbot server is running on port ${PORT}`);
-  console.log(`Open your browser and go to http://localhost:${PORT}`);
+  console.log(`🚀 Backend server is running on port ${PORT}`);
+  console.log(`📡 API endpoints available at http://localhost:${PORT}`);
+  console.log(`🌐 Frontend should connect from http://localhost:8080`);
 }); 

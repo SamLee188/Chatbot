@@ -9,6 +9,9 @@ class Chatbot {
         this.isTyping = false;
         this.messageCount = 0;
         
+        // Backend API configuration
+        this.backendUrl = 'http://localhost:3000';
+        
         // Initialize conversation history dictionary with enhanced structure
         this.conversationHistory = {
             sessionId: this.generateSessionId(),
@@ -231,17 +234,17 @@ class Chatbot {
 
     async checkServerStatus() {
         try {
-            const response = await fetch('/api/health');
+            const response = await fetch(`${this.backendUrl}/api/health`);
             if (response.ok) {
                 const data = await response.json();
-                this.updateStatus(`Connected to intelligent server (${data.activeSessions} active sessions)`, 'success');
+                this.updateStatus(`Connected to backend server (${data.activeSessions} active sessions)`, 'success');
                 this.updateOnlineStatus(true);
             } else {
-                this.updateStatus('Server connection failed', 'error');
+                this.updateStatus('Backend server connection failed', 'error');
                 this.updateOnlineStatus(false);
             }
         } catch (error) {
-            this.updateStatus('Cannot connect to server', 'error');
+            this.updateStatus('Cannot connect to backend server', 'error');
             this.updateOnlineStatus(false);
         }
     }
@@ -308,7 +311,7 @@ class Chatbot {
     }
 
     async sendMessage(message) {
-        const response = await fetch('/api/chat', {
+        const response = await fetch(`${this.backendUrl}/api/chat`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -518,6 +521,10 @@ class Chatbot {
             • Conversation Memory: Enabled
             • Topic Tracking: Active
             • Tone Analysis: Active
+            
+            🔗 Server Configuration:
+            • Frontend: http://localhost:8080
+            • Backend: ${this.backendUrl}
         `;
         alert(statsMessage);
     }
