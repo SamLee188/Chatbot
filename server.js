@@ -4,301 +4,279 @@ const OpenAI = require('openai');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000; // Use environment PORT for deployment
+const port = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:8080', 
-    'http://127.0.0.1:8080',
-    'https://chatbot-one-pi-15.vercel.app',
-    'https://*.vercel.app',
-    'https://*.netlify.app',
-    'https://*.herokuapp.com',
-    'https://*.railway.app',
-    'https://*.render.com'
-  ], // Allow frontend connections from various domains
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+app.use(cors());
 app.use(express.json());
+app.use(express.static('.')); // Serve static files from current directory
 
 // Initialize OpenAI
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+    apiKey: process.env.OPENAI_API_KEY,
 });
 
-// In-memory conversation storage (in production, use a database)
-const conversationSessions = new Map();
+// Conversation history storage
+const conversationHistory = new Map();
 
-// Enhanced system prompt for more intelligent responses
-const SYSTEM_PROMPT = `You are an intelligent, helpful, and friendly AI assistant with the following capabilities:
+// Session management
+let sessionCounter = 0;
 
-1. **Context Awareness**: Remember previous conversations and refer back to them when relevant
-2. **Personality**: Be warm, engaging, and conversational while remaining professional
-3. **Memory**: Use conversation history to provide more personalized and contextual responses
-4. **Knowledge**: Provide accurate, helpful information across various topics
-5. **Adaptability**: Adjust your communication style based on the user's tone and needs
-6. **Proactivity**: Ask follow-up questions when appropriate to better understand user needs
-7. **Clarity**: Explain complex concepts in simple terms when needed
-8. **Empathy**: Show understanding and emotional intelligence in your responses
-
-Guidelines:
-- Keep responses concise but informative (150-300 words max)
-- Use the conversation history to provide contextually relevant responses
-- Ask clarifying questions when user intent is unclear
-- Provide actionable advice when appropriate
-- Use examples and analogies to illustrate points
-- Maintain a consistent, helpful personality throughout the conversation
-
-Remember: You have access to the full conversation history, so use it to provide more intelligent and contextual responses.`;
-
-// Chat endpoint with conversation memory
-app.post('/api/chat', async (req, res) => {
-  try {
-    const { message, sessionId, conversationHistory } = req.body;
+// Function to optimize conversation history for API calls
+function optimizeConversationHistory(history) {
+    if (history.length <= 20) {
+        return history; // Keep all messages if conversation is short
+    }
     
-    if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
-    }
+    // For longer conversations, use smart truncation
+    const firstMessages = history.slice(0, 2); // Keep initial context
+    const recentMessages = history.slice(-18); // Keep recent context
+    return [...firstMessages, ...recentMessages];
+}
 
-    // Create or retrieve session
-    let session = conversationSessions.get(sessionId);
-    if (!session) {
-      session = {
-        id: sessionId,
-        startTime: new Date().toISOString(),
-        messages: [],
-        context: {},
-        userPreferences: {}
-      };
-      conversationSessions.set(sessionId, session);
-    }
-
-    // Add user message to session history
-    session.messages.push({
-      role: 'user',
-      content: message,
-      timestamp: new Date().toISOString()
-    });
-
-    // Build conversation context for AI
-    const conversationContext = buildConversationContext(session, conversationHistory);
-
-    // Create messages array for OpenAI
-    const messages = [
-      {
-        role: 'system',
-        content: SYSTEM_PROMPT
-      },
-      ...conversationContext
-    ];
-
-    // Get AI response
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: messages,
-      max_tokens: 300,
-      temperature: 0.7,
-      presence_penalty: 0.1, // Encourage new topics
-      frequency_penalty: 0.1, // Reduce repetition
-    });
-
-    const botResponse = completion.choices[0].message.content;
-
-    // Add bot response to session history
-    session.messages.push({
-      role: 'assistant',
-      content: botResponse,
-      timestamp: new Date().toISOString()
-    });
-
-    // Update session context based on conversation
-    updateSessionContext(session, message, botResponse);
-
-    // Keep only last 20 messages to manage memory
-    if (session.messages.length > 20) {
-      session.messages = session.messages.slice(-20);
-    }
-
-    res.json({ 
-      response: botResponse,
-      sessionId: sessionId,
-      context: session.context,
-      messageCount: session.messages.length
-    });
-
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ 
-      error: 'Failed to get response from OpenAI',
-      details: error.message 
-    });
-  }
+// Routes
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/index.html');
 });
 
-// Build conversation context from history
-function buildConversationContext(session, frontendHistory) {
-  const context = [];
-  
-  // Add recent messages from session (last 10)
-  const recentMessages = session.messages.slice(-10);
-  context.push(...recentMessages);
+app.post('/api/chat', async (req, res) => {
+    try {
+        const { message, sessionId } = req.body;
+        
+        if (!message) {
+            return res.status(400).json({ error: 'Message is required' });
+        }
+        
+        // Generate or use existing session ID
+        const currentSessionId = sessionId || `session_${++sessionCounter}`;
+        
+        // Get or create conversation history for this session
+        if (!conversationHistory.has(currentSessionId)) {
+            conversationHistory.set(currentSessionId, []);
+        }
+        
+        const history = conversationHistory.get(currentSessionId);
+        
+        // Add user message to history
+        history.push({
+            role: "user",
+            content: message,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Optimize conversation history for API call
+        const messagesToSend = optimizeConversationHistory(history);
+        
+        // Prepare messages for OpenAI (system + history + current message)
+        const messages = [
+            {
+                role: "system",
+                content: `You are Sunny AI, a bright, cheerful, and intelligent assistant with memory capabilities. You have a warm personality and always try to be helpful and engaging. 
 
-  // Add relevant context from frontend history if available
-  if (frontendHistory && frontendHistory.messages) {
-    const relevantMessages = frontendHistory.messages
-      .filter(msg => msg.sender === 'user' && !recentMessages.some(sm => sm.content === msg.content))
-      .slice(-5); // Last 5 unique user messages
+IMPORTANT: You remember previous conversations and can reference them to provide more contextual and personalized responses. If the user asks about something mentioned earlier in the conversation, refer back to it naturally.
 
-    relevantMessages.forEach(msg => {
-      context.push({
-        role: 'user',
-        content: msg.content,
-        timestamp: msg.timestamp
-      });
-    });
-  }
+Your capabilities include:
+- Remembering user preferences and past topics
+- Providing contextual responses based on conversation history
+- Maintaining a cheerful and enthusiastic tone
+- Using emojis and expressions when appropriate
+- Offering helpful suggestions and insights
+- Adapting your responses based on the conversation flow
 
-  return context;
-}
-
-// Update session context based on conversation
-function updateSessionContext(session, userMessage, botResponse) {
-  // Extract user preferences and topics
-  const topics = extractTopics(userMessage);
-  const preferences = extractPreferences(userMessage);
-  
-  // Update context
-  session.context = {
-    ...session.context,
-    topics: [...(session.context.topics || []), ...topics].slice(-10), // Keep last 10 topics
-    preferences: { ...session.context.preferences, ...preferences },
-    lastInteraction: new Date().toISOString(),
-    conversationTone: analyzeTone(userMessage)
-  };
-}
-
-// Extract topics from message
-function extractTopics(message) {
-  const topics = [];
-  const lowerMessage = message.toLowerCase();
-  
-  // Simple topic extraction (in production, use NLP libraries)
-  if (lowerMessage.includes('weather')) topics.push('weather');
-  if (lowerMessage.includes('music')) topics.push('music');
-  if (lowerMessage.includes('food') || lowerMessage.includes('cook')) topics.push('food');
-  if (lowerMessage.includes('travel') || lowerMessage.includes('trip')) topics.push('travel');
-  if (lowerMessage.includes('work') || lowerMessage.includes('job')) topics.push('work');
-  if (lowerMessage.includes('health') || lowerMessage.includes('exercise')) topics.push('health');
-  if (lowerMessage.includes('technology') || lowerMessage.includes('tech')) topics.push('technology');
-  if (lowerMessage.includes('education') || lowerMessage.includes('learn')) topics.push('education');
-  
-  return topics;
-}
-
-// Extract user preferences
-function extractPreferences(message) {
-  const preferences = {};
-  const lowerMessage = message.toLowerCase();
-  
-  if (lowerMessage.includes('i like') || lowerMessage.includes('i love')) {
-    preferences.likes = message.match(/i (like|love) (.+)/i)?.[2] || 'general topics';
-  }
-  
-  if (lowerMessage.includes('i don\'t like') || lowerMessage.includes('i hate')) {
-    preferences.dislikes = message.match(/i don't like (.+)/i)?.[1] || 'certain topics';
-  }
-  
-  return preferences;
-}
-
-// Analyze conversation tone
-function analyzeTone(message) {
-  const lowerMessage = message.toLowerCase();
-  
-  if (lowerMessage.includes('!') || lowerMessage.includes('excited')) return 'excited';
-  if (lowerMessage.includes('?') && lowerMessage.length < 20) return 'curious';
-  if (lowerMessage.includes('thank') || lowerMessage.includes('thanks')) return 'grateful';
-  if (lowerMessage.includes('sorry') || lowerMessage.includes('apologize')) return 'apologetic';
-  if (lowerMessage.includes('help') || lowerMessage.includes('need')) return 'needing_help';
-  
-  return 'neutral';
-}
-
-// Get conversation history endpoint
-app.get('/api/conversation/:sessionId', (req, res) => {
-  const { sessionId } = req.params;
-  const session = conversationSessions.get(sessionId);
-  
-  if (!session) {
-    return res.status(404).json({ error: 'Session not found' });
-  }
-  
-  res.json({
-    sessionId: session.id,
-    startTime: session.startTime,
-    messages: session.messages,
-    context: session.context,
-    messageCount: session.messages.length
-  });
-});
-
-// Get conversation analytics
-app.get('/api/analytics/:sessionId', (req, res) => {
-  const { sessionId } = req.params;
-  const session = conversationSessions.get(sessionId);
-  
-  if (!session) {
-    return res.status(404).json({ error: 'Session not found' });
-  }
-  
-  const analytics = {
-    sessionId: session.id,
-    totalMessages: session.messages.length,
-    userMessages: session.messages.filter(m => m.role === 'user').length,
-    botMessages: session.messages.filter(m => m.role === 'assistant').length,
-    sessionDuration: Date.now() - new Date(session.startTime).getTime(),
-    topics: session.context.topics || [],
-    preferences: session.context.preferences || {},
-    conversationTone: session.context.conversationTone || 'neutral',
-    lastActivity: session.context.lastInteraction
-  };
-  
-  res.json(analytics);
+Keep your responses conversational, friendly, and informative. Show that you remember what the user has told you by referencing previous parts of the conversation when relevant.`
+            },
+            ...messagesToSend
+        ];
+        
+        // Call OpenAI API with conversation history
+        const completion = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo",
+            messages: messages,
+            max_tokens: 800,
+            temperature: 0.8,
+            presence_penalty: 0.1,
+            frequency_penalty: 0.1,
+        });
+        
+        const response = completion.choices[0].message.content;
+        
+        // Add AI response to history
+        history.push({
+            role: "assistant",
+            content: response,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Update conversation history
+        conversationHistory.set(currentSessionId, history);
+        
+        // Log conversation for debugging
+        console.log(`Session ${currentSessionId}: ${history.length} messages (sent ${messages.length} to API)`);
+        
+        res.json({ 
+            response,
+            sessionId: currentSessionId,
+            messageCount: history.length,
+            contextSize: messages.length
+        });
+        
+    } catch (error) {
+        console.error('OpenAI API Error:', error);
+        
+        // Handle token limit errors specifically
+        if (error.message && error.message.includes('token')) {
+            console.log('Token limit reached, trying with shorter context...');
+            
+            try {
+                // Try again with only the last 10 messages
+                const shortHistory = history.slice(-10);
+                const shortMessages = [
+                    {
+                        role: "system",
+                        content: "You are Sunny AI, a bright and helpful assistant. Keep responses concise and friendly."
+                    },
+                    ...shortHistory
+                ];
+                
+                const retryCompletion = await openai.chat.completions.create({
+                    model: "gpt-3.5-turbo",
+                    messages: shortMessages,
+                    max_tokens: 600,
+                    temperature: 0.8,
+                });
+                
+                const response = retryCompletion.choices[0].message.content;
+                
+                // Add AI response to history
+                history.push({
+                    role: "assistant",
+                    content: response,
+                    timestamp: new Date().toISOString()
+                });
+                
+                conversationHistory.set(currentSessionId, history);
+                
+                res.json({ 
+                    response,
+                    sessionId: currentSessionId,
+                    messageCount: history.length,
+                    contextSize: shortMessages.length,
+                    note: "Used shortened context due to length"
+                });
+                return;
+                
+            } catch (retryError) {
+                console.error('Retry also failed:', retryError);
+            }
+        }
+        
+        if (error.code === 'insufficient_quota') {
+            res.status(500).json({ 
+                error: 'API quota exceeded. Please check your OpenAI account.' 
+            });
+        } else if (error.code === 'invalid_api_key') {
+            res.status(500).json({ 
+                error: 'Invalid API key. Please check your OpenAI API key.' 
+            });
+        } else {
+            res.status(500).json({ 
+                error: 'An error occurred while processing your request.' 
+            });
+        }
+    }
 });
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Intelligent chatbot backend server is running',
-    activeSessions: conversationSessions.size,
-    serverType: 'backend',
-    environment: process.env.NODE_ENV || 'development'
-  });
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        activeSessions: conversationHistory.size,
+        totalMessages: Array.from(conversationHistory.values()).reduce((sum, history) => sum + history.length, 0)
+    });
 });
 
-// Root endpoint for backend info
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Intelligent Chatbot Backend API',
-    version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
-    endpoints: {
-      chat: 'POST /api/chat',
-      health: 'GET /api/health',
-      conversation: 'GET /api/conversation/:sessionId',
-      analytics: 'GET /api/analytics/:sessionId'
-    },
-    deployment: 'Backend is ready for production deployment'
-  });
+// Get conversation history for a session
+app.get('/api/conversation/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    
+    if (!conversationHistory.has(sessionId)) {
+        return res.status(404).json({ error: 'Session not found' });
+    }
+    
+    const history = conversationHistory.get(sessionId);
+    res.json({ 
+        sessionId,
+        messages: history,
+        messageCount: history.length
+    });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Backend server is running on port ${PORT}`);
-  console.log(`📡 API endpoints available at http://localhost:${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 CORS enabled for production domains`);
+// Clear conversation history for a session
+app.delete('/api/conversation/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    
+    if (conversationHistory.has(sessionId)) {
+        conversationHistory.delete(sessionId);
+        res.json({ message: 'Conversation cleared successfully' });
+    } else {
+        res.status(404).json({ error: 'Session not found' });
+    }
+});
+
+// Get all active sessions
+app.get('/api/sessions', (req, res) => {
+    const sessions = Array.from(conversationHistory.keys()).map(sessionId => ({
+        sessionId,
+        messageCount: conversationHistory.get(sessionId).length,
+        lastActivity: conversationHistory.get(sessionId)[conversationHistory.get(sessionId).length - 1]?.timestamp
+    }));
+    
+    res.json({ sessions });
+});
+
+// Get conversation analytics
+app.get('/api/analytics', (req, res) => {
+    const totalSessions = conversationHistory.size;
+    const totalMessages = Array.from(conversationHistory.values()).reduce((sum, history) => sum + history.length, 0);
+    const averageMessagesPerSession = totalSessions > 0 ? Math.round(totalMessages / totalSessions) : 0;
+    
+    // Get most active session
+    let mostActiveSession = null;
+    let maxMessages = 0;
+    
+    for (const [sessionId, history] of conversationHistory.entries()) {
+        if (history.length > maxMessages) {
+            maxMessages = history.length;
+            mostActiveSession = sessionId;
+        }
+    }
+    
+    res.json({
+        totalSessions,
+        totalMessages,
+        averageMessagesPerSession,
+        mostActiveSession: mostActiveSession ? {
+            sessionId: mostActiveSession,
+            messageCount: maxMessages
+        } : null,
+        serverUptime: process.uptime()
+    });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ error: 'Something went wrong!' });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
+});
+
+// Start server
+app.listen(port, () => {
+    console.log(`🚀 Chatbot server running on http://localhost:${port}`);
+    console.log(`📝 Make sure to set your OPENAI_API_KEY in the .env file`);
 }); 
