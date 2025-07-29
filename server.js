@@ -4,12 +4,23 @@ const OpenAI = require('openai');
 require('dotenv').config();
 
 const app = express();
-const PORT = 3000; // Backend server on port 3000
+const PORT = process.env.PORT || 3000; // Use environment PORT for deployment
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://127.0.0.1:8080'], // Allow frontend connections
-  credentials: true
+  origin: [
+    'http://localhost:8080', 
+    'http://127.0.0.1:8080',
+    'https://chatbot-one-pi-15.vercel.app',
+    'https://*.vercel.app',
+    'https://*.netlify.app',
+    'https://*.herokuapp.com',
+    'https://*.railway.app',
+    'https://*.render.com'
+  ], // Allow frontend connections from various domains
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(express.json());
 
@@ -262,9 +273,10 @@ app.get('/api/analytics/:sessionId', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Intelligent chatbot backend server is running on port 3000',
+    message: 'Intelligent chatbot backend server is running',
     activeSessions: conversationSessions.size,
-    serverType: 'backend'
+    serverType: 'backend',
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -273,18 +285,20 @@ app.get('/', (req, res) => {
   res.json({
     message: 'Intelligent Chatbot Backend API',
     version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
     endpoints: {
       chat: 'POST /api/chat',
       health: 'GET /api/health',
       conversation: 'GET /api/conversation/:sessionId',
       analytics: 'GET /api/analytics/:sessionId'
     },
-    frontend: 'Frontend should be running on http://localhost:8080'
+    deployment: 'Backend is ready for production deployment'
   });
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend server is running on port ${PORT}`);
   console.log(`📡 API endpoints available at http://localhost:${PORT}`);
-  console.log(`🌐 Frontend should connect from http://localhost:8080`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 CORS enabled for production domains`);
 }); 

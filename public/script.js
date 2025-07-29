@@ -9,8 +9,8 @@ class Chatbot {
         this.isTyping = false;
         this.messageCount = 0;
         
-        // Backend API configuration
-        this.backendUrl = 'http://localhost:3000';
+        // Backend API configuration - auto-detect environment
+        this.backendUrl = this.getBackendUrl();
         
         // Initialize conversation history dictionary with enhanced structure
         this.conversationHistory = {
@@ -35,6 +35,24 @@ class Chatbot {
         };
         
         this.init();
+    }
+
+    getBackendUrl() {
+        // Auto-detect environment and set appropriate backend URL
+        const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
+        
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            // Development environment
+            return 'http://localhost:3000';
+        } else if (hostname.includes('vercel.app')) {
+            // Production environment - replace with your actual backend URL
+            // You'll need to deploy the backend and update this URL
+            return 'https://your-backend-url.vercel.app'; // Replace with actual backend URL
+        } else {
+            // Fallback for other domains
+            return `${protocol}//${hostname.replace('www.', '')}:3000`;
+        }
     }
 
     generateSessionId() {
@@ -246,6 +264,7 @@ class Chatbot {
         } catch (error) {
             this.updateStatus('Cannot connect to backend server', 'error');
             this.updateOnlineStatus(false);
+            console.error('Backend connection error:', error);
         }
     }
 
@@ -523,8 +542,9 @@ class Chatbot {
             • Tone Analysis: Active
             
             🔗 Server Configuration:
-            • Frontend: http://localhost:8080
+            • Frontend: ${window.location.origin}
             • Backend: ${this.backendUrl}
+            • Environment: ${window.location.hostname === 'localhost' ? 'Development' : 'Production'}
         `;
         alert(statsMessage);
     }
